@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 
 class ApiUser(AbstractUser):
@@ -37,7 +38,11 @@ class NewsItem(models.Model):
     ]
     title = models.CharField(max_length=200)
     content = models.TextField()
-    created_at = models.DateTimeField()
+    created_at = models.DateTimeField(
+        default=timezone.now,  # Значение по умолчанию, но можно переопределить
+        blank=True,  # Разрешить не передавать поле в формах/API
+        null=True  # Разрешить NULL в базе данных (опционально)
+    )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='DRAFT')
     is_organization_news = models.BooleanField(default=False)
     author = models.ForeignKey(ApiUser, on_delete=models.CASCADE, related_name='authored_news')

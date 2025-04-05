@@ -49,12 +49,7 @@ class NewsSerializer(serializers.ModelSerializer):
         queryset=Tag.objects.all(),
         required=False
     )
-    sources = serializers.SlugRelatedField(
-        many=True,
-        slug_field='name',
-        queryset=Source.objects.all(),
-        required=False
-    )
+
 
     class Meta:
         model = NewsItem
@@ -71,7 +66,7 @@ class NewsSerializer(serializers.ModelSerializer):
             'tags',
             'sources'
         ]
-        read_only_fields = ['id', 'created_at', 'author', 'status_display']
+        read_only_fields = ['id']
 
     def get_status_display(self, obj):
         return obj.get_status_display()
@@ -85,7 +80,6 @@ class NewsSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Извлекаем связанные данные
         tags = validated_data.pop('tags', [])
-        sources = validated_data.pop('sources', [])
 
         # Создаем основную статью
         news_item = NewsItem.objects.create(**validated_data)
@@ -94,13 +88,11 @@ class NewsSerializer(serializers.ModelSerializer):
         self._process_tags(news_item, tags)
 
         # Обрабатываем источники
-        self._process_sources(news_item, sources)
 
         return news_item
 
     def update(self, instance, validated_data):
         tags = validated_data.pop('tags', None)
-        sources = validated_data.pop('sources', None)
 
         # Обновляем основную статью
         instance = super().update(instance, validated_data)
@@ -110,10 +102,7 @@ class NewsSerializer(serializers.ModelSerializer):
             instance.tags.clear()
             self._process_tags(instance, tags)
 
-        # Обновляем источники только если они переданы
-        if sources is not None:
-            instance.sources.clear()
-            self._process_sources(instance, sources)
+        # Обно
 
         return instance
 
@@ -128,20 +117,6 @@ class NewsSerializer(serializers.ModelSerializer):
 
         # Добавляем все теги к статье
         news_item.tags.add(*existing_tags, *new_tags)
-
-    def _process_sources(self, news_item, sources):
-        """Обработка источников с bulk-операциями"""
-        existing_sources = Source.objects.filter(name__in=[s.name for s in sources])
-        new_sources = [s for s in sources if s not in existing_sources]
-
-        # Создаем отсутствующие источники
-        if new_sources:
-            Source.objects.bulk_create(new_sources)
-
-        # Добавляем все источники к статье
-        news_item.sources.add(*existing_sources, *new_sources)
-
-
 User = get_user_model()
 
 

@@ -3,7 +3,8 @@ from django.db.models import Q
 from rest_framework import viewsets, status, filters, generics
 from django.http import HttpResponse
 from django.db import connection
-from rest_framework.permissions import IsAuthenticated, DjangoModelPermissionsOrAnonReadOnly, AllowAny
+from rest_framework.permissions import IsAuthenticated, DjangoModelPermissionsOrAnonReadOnly, AllowAny, \
+    IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -66,6 +67,7 @@ class ApiUserItemViewSet(viewsets.ModelViewSet):
 
 
 class NewsItemViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticatedOrReadOnly]  # Запись только для аутентифицированных
     queryset = NewsItem.objects.all()
     http_method_names = ["get", 'post']
     serializer_class = NewsSerializer
@@ -107,6 +109,18 @@ class NewsFilterAPIView(APIView):
         serializer = NewsSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    def post(self, request):
+        serializer = NewsSerializer(
+            data=request.data,
+            context={'request': request}  # Передаём request в сериализатор
+        )
+
+        if serializer.is_valid():
+            serializer.save()  # Автоматически вызовет метод create сериализатора
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -124,6 +138,7 @@ class UserRegistrationAPIView(generics.CreateAPIView):
 
     def post(self, request, *args, **kwargs):
         # Остальной код без изменений
+        print(request.data)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -131,7 +146,20 @@ class UserRegistrationAPIView(generics.CreateAPIView):
         refresh = RefreshToken.for_user(user)
 
         return Response({
-            "user": serializer.data,
+            "user": serializer.data.id,
             "refresh": str(refresh),
             "access": str(refresh.access_token),
         }, status=status.HTTP_201_CREATED)
+
+
+class id_userAPIView(APIView):
+    permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
+    queryset = NewsItem.objects.all()  # Обязательно для DjangoModelPermissions
+
+    def get(self, request):
+        # Получаем параметры
+
+        username = request.query_params.get('username')
+        queryset = ApiUser.objects.all().get(username=username)
+
+        return Response({"id": queryset.id})
