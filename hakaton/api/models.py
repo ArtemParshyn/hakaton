@@ -1,74 +1,61 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-from django.db.models import Func
 
 
 class ApiUser(AbstractUser):
-    ...
 
-
-from django.db import models
-from django.contrib.auth.models import AbstractUser
-from django.utils.translation import gettext_lazy as _
-
-
-class User(AbstractUser):
-    ROLES = (
-        ('user', 'Обычный пользователь'),
-        ('admin', 'Администратор'),
-        ('publisher', 'Публикатор'),
-    )
-
-    role = models.CharField(max_length=10, choices=ROLES, default='user')
     telegram_chat_id = models.CharField(max_length=30, blank=True, null=True)
     can_publish = models.BooleanField(default=False)
+    is_admin = models.BooleanField(default=False)
+    can_write = models.BooleanField(default=True)
 
     def __str__(self):
         return self.username
 
 
-from django.db import models
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-
-
-class UserManager(BaseUserManager):
-    def create_user(self, login, password=None, **extra_fields):
-        if not login:
-            raise ValueError('The Login field must be set')
-        user = self.model(login=login, **extra_fields)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-
-    def create_superuser(self, login, password=None, **extra_fields):
-        extra_fields.setdefault('is_admin', True)
-        extra_fields.setdefault('can_write', True)
-        return self.create_user(login, password, **extra_fields)
-
-
-class User(AbstractBaseUser, PermissionsMixin):
-    user_id = models.AutoField(primary_key=True)
-    first_name = models.CharField(max_length=15)
-    last_name = models.CharField(max_length=20)
-    patronymic = models.CharField(max_length=20)
-    is_admin = models.BooleanField(default=False)
-    can_write = models.BooleanField(default=True)
-    telegram = models.CharField(max_length=30, blank=True, null=True)
-
-    login = models.CharField(max_length=30, unique=True)
-    password = models.CharField(max_length=128)  # Django хранит хэш пароля
-
-    USERNAME_FIELD = 'login'
-    REQUIRED_FIELDS = ['first_name', 'last_name', 'patronymic']
-
-    objects = UserManager()
-
-    @property
-    def is_staff(self):
-        return self.is_admin
+class Tag(models.Model):
+    name = models.CharField(max_length=50, unique=True)
 
     def __str__(self):
-        return f"{self.last_name} {self.first_name} {self.patronymic}"
+        return self.name
+
+
+class Source(models.Model):
+    name = models.CharField(max_length=100)
+    url = models.URLField()
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class NewsItem(models.Model):
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('PUBLISHED', 'Published'),
+        ('ARCHIVED', 'Archived'),
+    ]
+    title = models.CharField(max_length=200)
+    content = models.TextField()
+    created_at = models.DateTimeField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='DRAFT')
+    is_organization_news = models.BooleanField(default=False)
+    author = models.ForeignKey(ApiUser, on_delete=models.CASCADE, related_name='authored_news')
+    tags = models.ManyToManyField(Tag, related_name='news_items')
+    sources = models.URLField(blank=False)
+    cover = models.URLField(default=0)
+
+    def __str__(self):
+        return self.title
+
+
+class UserTagSubscription(models.Model):
+    user = models.ForeignKey(ApiUser, on_delete=models.CASCADE, related_name='subscriptions')
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name='subscribed_by')
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'users'
+        unique_together = ('user', 'tag')
+
+    def __str__(self):
+        return f"{self.user.username} subscribed to {self.tag.name}"
