@@ -7,13 +7,19 @@ from .models import *
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApiUser
-        fields = ['id', 'username', 'email', 'can_publish', 'is_admin']
+        fields = ['id', 'username', 'email', 'can_publish', 'is_admin', 'telegram_chat_id']
         read_only_fields = ['can_publish', 'is_admin']
 
 
 class TagSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tag
+        fields = '__all__'
+
+
+class UserNewSubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserNewSubscription
         fields = '__all__'
 
 
@@ -34,13 +40,6 @@ class NewsItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'author']
 
 
-class UserTagSubscriptionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = UserTagSubscription
-        fields = '__all__'
-        read_only_fields = ['user', 'created_at']
-
-
 class NewsSerializer(serializers.ModelSerializer):
     status_display = serializers.SerializerMethodField(read_only=True)
     tags = serializers.SlugRelatedField(
@@ -49,7 +48,6 @@ class NewsSerializer(serializers.ModelSerializer):
         queryset=Tag.objects.all(),
         required=False
     )
-
 
     class Meta:
         model = NewsItem
@@ -117,11 +115,12 @@ class NewsSerializer(serializers.ModelSerializer):
 
         # Добавляем все теги к статье
         news_item.tags.add(*existing_tags, *new_tags)
+
+
 User = get_user_model()
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
-
     password = serializers.CharField(
         write_only=True,
         required=True,

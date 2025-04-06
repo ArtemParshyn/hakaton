@@ -9,6 +9,7 @@ class ApiUser(AbstractUser):
     can_publish = models.BooleanField(default=False)
     is_admin = models.BooleanField(default=False)
     can_write = models.BooleanField(default=True)
+    subscribed = models.BooleanField(default=False)
 
     def __str__(self):
         return self.username
@@ -54,13 +55,10 @@ class NewsItem(models.Model):
         return self.title
 
 
-class UserTagSubscription(models.Model):
+class UserNewSubscription(models.Model):
     user = models.ForeignKey(ApiUser, on_delete=models.CASCADE, related_name='subscriptions')
-    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name='subscribed_by')
+    new = models.ForeignKey(NewsItem, on_delete=models.CASCADE, related_name='subscribed_by')
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        unique_together = ('user', 'tag')
-
     def __str__(self):
-        return f"{self.user.username} subscribed to {self.tag.name}"
+        return f"{self.user.username} subscribed to {self.new.title}"

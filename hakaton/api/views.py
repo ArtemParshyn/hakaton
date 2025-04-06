@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.checks import Tags
 from django.db.models import Q
 from rest_framework import viewsets, status, filters, generics
 from django.http import HttpResponse
@@ -9,30 +10,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import NewsItem, UserTagSubscription, Source, Tag, ApiUser
-from .serializer import NewsSerializer, TagSerializer, SourceSerializer, UserTagSubscriptionSerializer, UserSerializer, \
-    UserRegistrationSerializer
-
-
-def call_test_function():
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM test()")
-        columns = [col[0] for col in cursor.description]  # Получаем названия колонок
-        results = cursor.fetchall()
-
-    # Преобразуем в список словарей (опционально)
-    data = [dict(zip(columns, row)) for row in results]
-    for i in data:
-        print(i['lol'], i['lolx2'])
-    return data
-
-
-def index(request):
-    # Способ 1: Использование Func в запросе
-    call_test_function()
-    return HttpResponse(f"Результат функции: {1}")
-    # Или для JSON:
-    # return JsonResponse({'result': result})
+from .models import NewsItem, Source, Tag, ApiUser, UserNewSubscription
+from .serializer import NewsSerializer, TagSerializer, SourceSerializer, UserSerializer, \
+    UserRegistrationSerializer, UserNewSubscriptionSerializer
 
 
 class ProtectedView(APIView):
@@ -44,7 +24,7 @@ class ProtectedView(APIView):
 
 class TagViewSet(viewsets.ModelViewSet):
     queryset = Tag.objects.all()
-    http_method_names = ["get"]
+    http_method_names = ["get", "post"]
     serializer_class = TagSerializer
 
 
@@ -54,49 +34,92 @@ class SourceItemViewSet(viewsets.ModelViewSet):
     serializer_class = SourceSerializer
 
 
-class UserTagSubscriptionViewSet(viewsets.ModelViewSet):
-    queryset = UserTagSubscription.objects.all()
-    http_method_names = ["get"]
-    serializer_class = UserTagSubscriptionSerializer
+class UserNewSubscriptionViewSet(viewsets.ModelViewSet):
+    queryset = UserNewSubscription.objects.all()
+    http_method = ['post', 'get', 'delete']
+    serializer_class = UserNewSubscriptionSerializer
 
 
 class ApiUserItemViewSet(viewsets.ModelViewSet):
     queryset = ApiUser.objects.all()
-    http_method_names = ["get"]
     serializer_class = UserSerializer
+    http_method_names = ["get", "put", "patch"]  # Разрешить PUT и PATCH
+
+    def update(self, request, *args, **kwargs):
+        # Получаем user_id и telegram_chat_id из query-параметров
+        user_id = request.query_params.get('id')
+        telegram_chat_id = request.query_params.get('telegram_chat_id')
+
+        if not user_id or not telegram_chat_id:
+            return Response(
+                {"error": "Параметры 'id' и 'telegram_chat_id' обязательны"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = ApiUser.objects.get(id=user_id)
+        except ApiUser.DoesNotExist:
+            return Response(
+                {"error": "Пользователь не найден"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Обновляем поле
+        user.telegram_chat_id = telegram_chat_id
+        user.save()
+
+        return Response(
+            {"id": user.id, "telegram_chat_id": user.telegram_chat_id},
+            status=status.HTTP_200_OK
+        )
 
 
 class NewsItemViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]  # Запись только для аутентифицированных
+    permission_classes = [IsAuthenticated]
     queryset = NewsItem.objects.all()
     http_method_names = ["get", 'post']
     serializer_class = NewsSerializer
 
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
+
 class NewsFilterAPIView(APIView):
     permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
-    queryset = NewsItem.objects.all()  # Обязательно для DjangoModelPermissions
+    queryset = NewsItem.objects.all()
+    serializer_class = NewsSerializer
 
     def get_queryset(self):
-        return self.queryset.all()  # Базовый запрос
+        return self.queryset.prefetch_related('tags', 'author')
 
     def get(self, request):
-        # Получаем параметры
+        # Получаем все параметры
         filter_param = request.query_params.get('filter', '')
+        search_query = request.query_params.get('search', '')
         user_id = request.query_params.get('user_id')
 
-        # Начинаем с базового queryset
         queryset = self.get_queryset()
 
-        # Фильтр по тегам (только если есть параметр filter)
+        # Фильтр по тегам (И-логика)
         if filter_param:
-            filter_values = [value.strip() for value in filter_param.split(',')]
-            for tag in filter_values:
-                queryset = queryset.filter(tags__name=tag)
+            filter_tags = [tag.strip() for tag in filter_param.split(',') if tag.strip()]
+            for tag_name in filter_tags:
+                queryset = queryset.filter(tags__name__icontains=tag_name)
 
-        # Фильтр по пользователю (только если есть user_id)
+        # Поиск по названию
+        if search_query:
+            if search_query[0] == '_':
+                queryset = Tag.objects.all().filter(name__icontains=search_query[1:])
+                serializer = TagSerializer(queryset, many=True)
+
+                return Response(serializer.data)
+            else:
+                queryset = queryset.filter(title__icontains=search_query)
+
+        # Фильтр по автору
         if user_id:
-            print()
             try:
                 queryset = queryset.filter(author_id=int(user_id))
             except ValueError:
@@ -105,21 +128,29 @@ class NewsFilterAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # Всегда возвращаем результат, даже без фильтров
-        serializer = NewsSerializer(queryset, many=True)
+        # Убираем дубликаты и сортируем
+        queryset = queryset.distinct().order_by('-created_at')
+
+        serializer = self.serializer_class(queryset, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = NewsSerializer(
-            data=request.data,
-            context={'request': request}  # Передаём request в сериализатор
-        )
+        print(ApiUser.objects.all().get(pk=int(request.data['author'])).can_write)
+        if ApiUser.objects.all().get(pk=int(request.data['author'])).can_write:
 
-        if serializer.is_valid():
-            serializer.save()  # Автоматически вызовет метод create сериализатора
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            serializer = NewsSerializer(
+                data=request.data,
+                context={'request': request}  # Передаём request в сериализатор
+            )
+            #
+            if serializer.is_valid():
+                serializer.save()  # Автоматически вызовет метод create сериализатора
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            #
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response(status=status.HTTP_403_FORBIDDEN)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -138,15 +169,13 @@ class UserRegistrationAPIView(generics.CreateAPIView):
 
     def post(self, request, *args, **kwargs):
         # Остальной код без изменений
-        print(request.data)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-
         refresh = RefreshToken.for_user(user)
-
+        print(serializer.data)
         return Response({
-            "user": serializer.data.id,
+            "user": serializer.data["username"],
             "refresh": str(refresh),
             "access": str(refresh.access_token),
         }, status=status.HTTP_201_CREATED)
@@ -163,3 +192,121 @@ class id_userAPIView(APIView):
         queryset = ApiUser.objects.all().get(username=username)
 
         return Response({"id": queryset.id})
+
+
+class subs_userAPIView(APIView):
+    permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
+    queryset = ApiUser.objects.all()  # Обязательно для DjangoModelPermissions
+
+    def get(self, request):
+        # Получаем параметры
+
+        queryset = ApiUser.objects.all().filter(subscribed=True)
+        data = [i.telegram_chat_id for i in queryset]
+        return Response(data)
+
+
+from rest_framework.response import Response
+from rest_framework import status
+from .models import UserNewSubscription, ApiUser, NewsItem
+
+
+class checklikeAPIView(APIView):
+    permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
+    queryset = UserNewSubscription.objects.all()
+
+    def delete(self, request):
+        # Получаем параметры из URL
+        user_id = request.query_params.get('user_id')
+        news_id = request.query_params.get('id')  # Переименовано для ясности
+
+        # Проверка наличия обязательных параметров
+        if not user_id or not news_id:
+            return Response(
+                {"error": "Параметры user_id и id обязательны"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Получаем объекты из БД
+            user = ApiUser.objects.get(pk=int(user_id))
+            news = NewsItem.objects.get(pk=int(news_id))
+
+            # Ищем подписку
+            subscription = UserNewSubscription.objects.filter(
+                user=user,
+                new=news
+            ).first()
+
+            if not subscription:
+                return Response(
+                    {"error": "Подписка не найдена"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Удаляем подписку
+            subscription.delete()
+            return Response(
+                {"message": "Подписка успешно удалена"},
+                status=status.HTTP_204_NO_CONTENT
+            )
+
+        except (ApiUser.DoesNotExist, NewsItem.DoesNotExist):
+            return Response(
+                {"error": "Пользователь или новость не найдены"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        except ValueError:
+            return Response(
+                {"error": "Некорректный формат ID"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def get(self, request):
+        # Получаем параметры
+        user_id = request.query_params.get('user_id')
+        id = request.query_params.get('id')
+        return Response(self.queryset.filter(user=ApiUser.objects.all().get(pk=int(user_id)),
+                                             new=NewsItem.objects.all().get(pk=int(id))).exists())
+
+class tg_userAPIView(APIView):
+    permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
+    queryset = NewsItem.objects.all()  # Обязательно для DjangoModelPermissions
+
+    def get(self, request):
+        # Получаем параметры
+
+        tg = request.query_params.get('tg')
+        queryset = ApiUser.objects.all().get(telegram_chat_id=tg)
+
+        return Response({"id": queryset.id, 'tg': queryset.telegram_chat_id})
+
+    def put(self, request):
+        user_id = request.query_params.get('id')
+        telegram_chat_id = request.query_params.get('telegram_chat_id')
+
+        if not user_id or not telegram_chat_id:
+            return Response(
+                {"error": "Параметры 'id' и 'telegram_chat_id' обязательны"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = ApiUser.objects.get(id=user_id)
+            user.telegram_chat_id = telegram_chat_id
+            user.save()
+            return Response(
+                {"id": user.id, "telegram_chat_id": user.telegram_chat_id},
+                status=status.HTTP_200_OK
+            )
+        except ApiUser.DoesNotExist:
+            return Response(
+                {"error": "Пользователь не найден"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except ValueError:
+            return Response(
+                {"error": "Некорректный ID пользователя"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
