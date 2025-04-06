@@ -22,6 +22,10 @@ class Tag(models.Model):
         return self.name
 
 
+class Urls(models.Model):
+    code = models.CharField(max_length=64)
+
+
 class Source(models.Model):
     name = models.CharField(max_length=100)
     url = models.URLField()
@@ -40,9 +44,9 @@ class NewsItem(models.Model):
     title = models.CharField(max_length=200)
     content = models.TextField()
     created_at = models.DateTimeField(
-        default=timezone.now,  # Значение по умолчанию, но можно переопределить
-        blank=True,  # Разрешить не передавать поле в формах/API
-        null=True  # Разрешить NULL в базе данных (опционально)
+        default=timezone.now,
+        blank=True,
+        null=True
     )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='DRAFT')
     is_organization_news = models.BooleanField(default=False)

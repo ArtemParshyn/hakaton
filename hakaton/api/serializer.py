@@ -70,37 +70,27 @@ class NewsSerializer(serializers.ModelSerializer):
         return obj.get_status_display()
 
     def validate_author(self, value):
-        # Автоматически устанавливаем текущего пользователя как автора
         if self.context['request'].method in ['POST', 'PUT', 'PATCH']:
             return self.context['request'].user
         return value
 
     def create(self, validated_data):
-        # Извлекаем связанные данные
         tags = validated_data.pop('tags', [])
 
-        # Создаем основную статью
         news_item = NewsItem.objects.create(**validated_data)
 
-        # Обрабатываем теги
         self._process_tags(news_item, tags)
-
-        # Обрабатываем источники
 
         return news_item
 
     def update(self, instance, validated_data):
         tags = validated_data.pop('tags', None)
 
-        # Обновляем основную статью
         instance = super().update(instance, validated_data)
 
-        # Обновляем теги только если они переданы
         if tags is not None:
             instance.tags.clear()
             self._process_tags(instance, tags)
-
-        # Обно
 
         return instance
 
@@ -109,11 +99,9 @@ class NewsSerializer(serializers.ModelSerializer):
         existing_tags = Tag.objects.filter(name__in=[tag.name for tag in tags])
         new_tags = [tag for tag in tags if tag not in existing_tags]
 
-        # Создаем отсутствующие теги
         if new_tags:
             Tag.objects.bulk_create(new_tags)
 
-        # Добавляем все теги к статье
         news_item.tags.add(*existing_tags, *new_tags)
 
 

@@ -1,25 +1,12 @@
 from django.contrib.auth import get_user_model
-from django.core.checks import Tags
-from django.db.models import Q
-from rest_framework import viewsets, status, filters, generics
-from django.http import HttpResponse
-from django.db import connection
-from rest_framework.permissions import IsAuthenticated, DjangoModelPermissionsOrAnonReadOnly, AllowAny, \
-    IsAuthenticatedOrReadOnly
-from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework import viewsets, generics
+from rest_framework.permissions import IsAuthenticated, DjangoModelPermissionsOrAnonReadOnly, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-
+import secrets
+import string
 from .models import NewsItem, Source, Tag, ApiUser, UserNewSubscription
 from .serializer import NewsSerializer, TagSerializer, SourceSerializer, UserSerializer, \
     UserRegistrationSerializer, UserNewSubscriptionSerializer
-
-
-class ProtectedView(APIView):
-    permission_classes = [IsAuthenticated]  # Требуется аутентификация
-
-    def get(self, request):
-        return Response({"message": "Вы авторизованы!"})
 
 
 class TagViewSet(viewsets.ModelViewSet):
@@ -43,10 +30,9 @@ class UserNewSubscriptionViewSet(viewsets.ModelViewSet):
 class ApiUserItemViewSet(viewsets.ModelViewSet):
     queryset = ApiUser.objects.all()
     serializer_class = UserSerializer
-    http_method_names = ["get", "put", "patch"]  # Разрешить PUT и PATCH
+    http_method_names = ["get", "put", "patch"]
 
     def update(self, request, *args, **kwargs):
-        # Получаем user_id и telegram_chat_id из query-параметров
         user_id = request.query_params.get('id')
         telegram_chat_id = request.query_params.get('telegram_chat_id')
 
@@ -64,7 +50,6 @@ class ApiUserItemViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Обновляем поле
         user.telegram_chat_id = telegram_chat_id
         user.save()
 
@@ -75,15 +60,12 @@ class ApiUserItemViewSet(viewsets.ModelViewSet):
 
 
 class NewsItemViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
     queryset = NewsItem.objects.all()
     http_method_names = ["get", 'post']
     serializer_class = NewsSerializer
 
 
 from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
 
 
 class NewsFilterAPIView(APIView):
@@ -95,20 +77,17 @@ class NewsFilterAPIView(APIView):
         return self.queryset.prefetch_related('tags', 'author')
 
     def get(self, request):
-        # Получаем все параметры
         filter_param = request.query_params.get('filter', '')
         search_query = request.query_params.get('search', '')
         user_id = request.query_params.get('user_id')
 
         queryset = self.get_queryset()
 
-        # Фильтр по тегам (И-логика)
         if filter_param:
             filter_tags = [tag.strip() for tag in filter_param.split(',') if tag.strip()]
             for tag_name in filter_tags:
                 queryset = queryset.filter(tags__name__icontains=tag_name)
 
-        # Поиск по названию
         if search_query:
             if search_query[0] == '_':
                 queryset = Tag.objects.all().filter(name__icontains=search_query[1:])
@@ -118,7 +97,6 @@ class NewsFilterAPIView(APIView):
             else:
                 queryset = queryset.filter(title__icontains=search_query)
 
-        # Фильтр по автору
         if user_id:
             try:
                 queryset = queryset.filter(author_id=int(user_id))
@@ -128,7 +106,6 @@ class NewsFilterAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # Убираем дубликаты и сортируем
         queryset = queryset.distinct().order_by('-created_at')
 
         serializer = self.serializer_class(queryset, many=True)
@@ -140,11 +117,11 @@ class NewsFilterAPIView(APIView):
 
             serializer = NewsSerializer(
                 data=request.data,
-                context={'request': request}  # Передаём request в сериализатор
+                context={'request': request}
             )
             #
             if serializer.is_valid():
-                serializer.save()  # Автоматически вызовет метод create сериализатора
+                serializer.save()
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             #
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -163,12 +140,11 @@ class UserProfileView(APIView):
 
 
 class UserRegistrationAPIView(generics.CreateAPIView):
-    permission_classes = [AllowAny]  # Разрешить доступ без аутентификации
+    permission_classes = [AllowAny]
     serializer_class = UserRegistrationSerializer
     queryset = get_user_model().objects.none()
 
     def post(self, request, *args, **kwargs):
-        # Остальной код без изменений
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -183,11 +159,9 @@ class UserRegistrationAPIView(generics.CreateAPIView):
 
 class id_userAPIView(APIView):
     permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
-    queryset = NewsItem.objects.all()  # Обязательно для DjangoModelPermissions
+    queryset = NewsItem.objects.all()
 
     def get(self, request):
-        # Получаем параметры
-
         username = request.query_params.get('username')
         queryset = ApiUser.objects.all().get(username=username)
 
@@ -196,11 +170,9 @@ class id_userAPIView(APIView):
 
 class subs_userAPIView(APIView):
     permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
-    queryset = ApiUser.objects.all()  # Обязательно для DjangoModelPermissions
+    queryset = ApiUser.objects.all()
 
     def get(self, request):
-        # Получаем параметры
-
         queryset = ApiUser.objects.all().filter(subscribed=True)
         data = [i.telegram_chat_id for i in queryset]
         return Response(data)
@@ -208,7 +180,7 @@ class subs_userAPIView(APIView):
 
 from rest_framework.response import Response
 from rest_framework import status
-from .models import UserNewSubscription, ApiUser, NewsItem
+from .models import ApiUser, NewsItem
 
 
 class checklikeAPIView(APIView):
@@ -216,11 +188,9 @@ class checklikeAPIView(APIView):
     queryset = UserNewSubscription.objects.all()
 
     def delete(self, request):
-        # Получаем параметры из URL
         user_id = request.query_params.get('user_id')
-        news_id = request.query_params.get('id')  # Переименовано для ясности
+        news_id = request.query_params.get('id')
 
-        # Проверка наличия обязательных параметров
         if not user_id or not news_id:
             return Response(
                 {"error": "Параметры user_id и id обязательны"},
@@ -228,11 +198,9 @@ class checklikeAPIView(APIView):
             )
 
         try:
-            # Получаем объекты из БД
             user = ApiUser.objects.get(pk=int(user_id))
             news = NewsItem.objects.get(pk=int(news_id))
 
-            # Ищем подписку
             subscription = UserNewSubscription.objects.filter(
                 user=user,
                 new=news
@@ -264,18 +232,17 @@ class checklikeAPIView(APIView):
             )
 
     def get(self, request):
-        # Получаем параметры
         user_id = request.query_params.get('user_id')
         id = request.query_params.get('id')
         return Response(self.queryset.filter(user=ApiUser.objects.all().get(pk=int(user_id)),
                                              new=NewsItem.objects.all().get(pk=int(id))).exists())
 
+
 class tg_userAPIView(APIView):
     permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
-    queryset = NewsItem.objects.all()  # Обязательно для DjangoModelPermissions
+    queryset = NewsItem.objects.all()
 
     def get(self, request):
-        # Получаем параметры
 
         tg = request.query_params.get('tg')
         queryset = ApiUser.objects.all().get(telegram_chat_id=tg)

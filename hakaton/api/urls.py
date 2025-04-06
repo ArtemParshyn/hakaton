@@ -2,7 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from . import views
-from .views import NewsItemViewSet, UserProfileView, id_userAPIView, NewsFilterAPIView, tg_userAPIView, \
+from .views import NewsItemViewSet, id_userAPIView, NewsFilterAPIView, tg_userAPIView, \
     subs_userAPIView, checklikeAPIView
 
 router = DefaultRouter()

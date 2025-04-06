@@ -80,4 +80,3 @@ class ApiUserAdmin(admin.ModelAdmin):
 
     authored_news_count.short_description = 'Статей написано'
 
-# Register your models here.
